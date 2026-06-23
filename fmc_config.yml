@@ -1,0 +1,11 @@
+---
+hostname_preamble:
+  - WGC100
+  - WGC300
+  - WGC101
+
+hostname_postamble:
+  - .niehl.ford.com
+  - .niehl.gft.ford.com
+  - .merkenich.ford.com
+  - .longerich.ford.com

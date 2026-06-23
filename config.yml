@@ -1,0 +1,8 @@
+---
+hostname_preamble:
+  - "www."
+  - ""
+
+hostname_postamble:
+  - .com
+  - .tailcde842.ts.net
