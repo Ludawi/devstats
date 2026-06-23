@@ -1,121 +1,157 @@
+import platform
+import socket
 import subprocess
 import yaml
-import socket
-import platform
-
-CONFIG_FILE = "./config.yml"
-DNS_SERVER = "1.1.1.1"
-
-
-def create_runtime_conf():
-    global conf
-    global preamble
-    global postamble
-
-    try:
-        with open(CONFIG_FILE, "r") as config:
-            data = yaml.safe_load(config)
-    except OSError:
-        print(f"No config file found at {CONFIG_FILE}")
-        return -1
-
-    preamble = data["hostname_preamble"]
-    postamble = data["hostname_postamble"]
-
-    if type(preamble) is list or preamble is None:
-        if len(preamble) == 0:
-            preamble = [""]
-        else:
-            pass
-
-    if type(postamble) is list or preamble is None:
-        if len(postamble) == 0:
-            postamble = [""]
-        else:
-            pass
-
-    conf = True
-    return
 
 
 class Device:
-    """Provides all neccessary data for importing a new device (service tag)
-        returns:
-            - fqdn  string
-            - ip    string
-            - ping  bool
-    """
+    """Interface for device lookup, ping validation, and inventory import."""
 
-    def __init__(self):
-        self.service_tag
-        self.fqdn
-        self.ip
+    _CONFIG_FILE = "./config.yml"
+    _PREAMBLE = [""]
+    _POSTAMBLE = [""]
+    _CONFIG_LOADED = False
 
+    def __init__(self, service_tag):
+        self.service_tag = service_tag
+        self.hostname = None
+        self.fqdn = None
+        self.ip = None
+        self.pingable = False
+        self.hostname_replacement = None
 
-def assemble_hostnames(service_tag):
-    hostnames = []
-
-    for i in preamble:
-        if preamble is None:
-            pass
-        else:
-            hostname_pre = f"{i}{service_tag}"
-        for n in postamble:
-            if postamble is None:
-                pass
-            else:
-                hostname = f"{hostname_pre}{n}"
-                hostnames.append(hostname)
-                hostname = ""
-
-    return hostnames
-
-
-def ip_lookup(hostname):
-    try:
-        # Resolve the hostname to an IPv4 address
-        ip_address = socket.gethostbyname(hostname)
-        return ip_address
-    except socket.gaierror:
-        # gaierror happens if the hostname cannot be resolved (NXDOMAIN)
-        print(f"[Info] Could not resolve hostname: {hostname}")
-        return None
-    except Exception as e:
-        # Catches other potential issues like network timeouts
-        print(f"[Info] Error looking up {hostname}: {e}")
-        return None
-    pass
-
-
-def ping(ip):
-    #  Assemble parameters based on platform
-    param = "-n" if platform.system() == "Windows" else "-c"
-    command = ["ping", param, "2", ip]
-
-    try:
-        result = subprocess.run(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    def __repr__(self):
+        return (
+            f"Device(service_tag='{self.service_tag}', hostname='{
+                self.hostname}', "
+            f"fqdn='{self.fqdn}', ip='{self.ip}', pingable={self.pingable}, "
+            f"hostname_replacement='{self.hostname_replacement}')"
         )
-        return result.returncode == 0
 
-    except Exception as e:
-        print(f"[Info] Failed to ping {ip}: {e}")
-        return False
+    # --- Configuration Helpers ---
+
+    @classmethod
+    def _load_config(cls):
+        """Loads the YAML configuration file."""
+        if cls._CONFIG_LOADED:
+            return
+
+        try:
+            with open(cls._CONFIG_FILE, "r") as config:
+                data = yaml.safe_load(config) or {}
+        except OSError:
+            cls._CONFIG_LOADED = True
+            return
+
+        pre = data.get("hostname_preamble")
+        post = data.get("hostname_postamble")
+
+        if pre:
+            cls._PREAMBLE = pre if isinstance(pre, list) else [pre]
+        if post:
+            cls._POSTAMBLE = post if isinstance(post, list) else [post]
+
+        cls._CONFIG_LOADED = True
+
+    @classmethod
+    def _assemble_hostnames(cls, service_tag):
+        """Generates all candidate hostnames based on config values."""
+        cls._load_config()
+        hostnames = []
+        for pre in cls._PREAMBLE:
+            for post in cls._POSTAMBLE:
+                hostnames.append(f"{pre}{service_tag}{post}")
+        return hostnames
+
+    # --- Public Methods ---
+
+    @classmethod
+    def ip_lookup(cls, hostname):
+        """Resolves a given hostname string to an IPv4 address."""
+        try:
+            return socket.gethostbyname(hostname)
+        except socket.gaierror:
+            return None
+        except Exception as e:
+            print(f"[Info] Error looking up {hostname}: {e}")
+            return None
+
+    @classmethod
+    def ping(cls, ip):
+        """Pings an IP address and returns True if successful, False otherwise."""
+        if not ip:
+            return False
+        param = "-n" if platform.system() == "Windows" else "-c"
+        command = ["ping", param, "2", ip]
+
+        try:
+            result = subprocess.run(
+                command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            return result.returncode == 0
+        except Exception as e:
+            print(f"[Info] Failed to ping {ip}: {e}")
+            return False
+
+    # --- Public Interfaces ---
+
+    @classmethod
+    def get_ip(cls, service_tag):
+        """Returns IPv4 address string of a device based on its service tag."""
+        candidate_hostnames = cls._assemble_hostnames(service_tag)
+        for candidate in candidate_hostnames:
+            ip = cls.ip_lookup(candidate)
+            if ip:
+                return ip
+        return None
+
+    @classmethod
+    def get_inventory(cls, service_tag):
+        """Processes a service tag and returns an initialized Device instance
+
+        containing fqdn, hostname, ip, ping status, and replacements.
+        """
+        device = cls(service_tag=service_tag)
+        candidate_hostnames = cls._assemble_hostnames(service_tag)
+
+        for candidate in candidate_hostnames:
+            ip = cls.ip_lookup(candidate)
+            if ip:
+                device.ip = ip
+                device.pingable = cls.ping(ip)
+
+                try:
+                    actual_fqdn, _, _ = socket.gethostbyaddr(ip)
+                    device.fqdn = actual_fqdn
+
+                    if actual_fqdn.lower() != candidate.lower():
+                        device.hostname = candidate
+                        device.hostname_replacement = actual_fqdn
+                    else:
+                        device.hostname = candidate
+                except socket.herror:
+                    device.hostname = candidate
+                    device.fqdn = candidate
+
+                return device
+
+        return device
 
 
-create_runtime_conf()
-
-
-def inventory_import(service_tag):
-    """Provides all neccessary data for importing a new device (service tag)
-        returns:
-            - fqdn  string
-            - ip    string
-            - ping  bool
-    """
-    hostnames = assemble_hostnames("google")
-    for i in hostnames:
-        current_ip = ip_lookup(i)
-        if current_ip is not None:
-            res = ping(current_ip)
-            print(res)
+# --- EXAMPLES ---
+# if __name__ == "__main__":
+#
+#     # 1. Quick IP lookup directly from the class
+#     ip_address = Device.get_ip("google")
+#     print(f"IP: {ip_address}")
+#
+#     print("---")
+#
+#     # 2. Complete Inventory validation returning the populated class object
+#     my_device = Device.get_inventory("1984-0")
+#     print("Populated Device Object Attributes:")
+#     print(f" -> Service Tag: {my_device.service_tag}")
+#     print(f" -> Hostname:    {my_device.hostname}")
+#     print(f" -> FQDN:        {my_device.fqdn}")
+#     print(f" -> IP:          {my_device.ip}")
+#     print(f" -> Ping:        {my_device.pingable}")
