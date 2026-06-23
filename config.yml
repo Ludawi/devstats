@@ -1,6 +1,5 @@
 ---
 hostname_preamble:
-  - "www."
   - ""
 
 hostname_postamble:

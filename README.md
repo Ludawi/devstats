@@ -1,3 +1,12 @@
+# devstats
+Get network stats for a device in your network or an internet service.
+
+## --- CLI USAGE ---
+
+```powershell
+  python main.py <hostname>
+
+```
 
 ## --- EXAMPLES ---
 An example with the google website
