@@ -1,6 +1,6 @@
 
 ## --- EXAMPLES ---
-An example with the google website as an example
+An example with the google website
 ```python
     from devstats import Device
 
