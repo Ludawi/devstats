@@ -3,11 +3,14 @@
     PowerShell wrapper for the devstats CLI tool.
 #>
 [CmdletBinding()]
-param()
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    $RemainingArgs
+)
 
 $ScriptDir = $PSScriptRoot
 $PythonScript = Join-Path $ScriptDir "main.py"
 
 # Splat all passed arguments
-python $PythonScript @args
+python $PythonScript @RemainingArgs
 exit $LASTEXITCODE
